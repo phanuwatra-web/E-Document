@@ -112,9 +112,10 @@ const getMe = async (req, res, next) => {
  *     who got hold of a live session via XSS or stolen device)
  *   - a new password that passes the policy in utils/password.js
  *
- * On success we ALSO clear the auth cookies → user must log in again. This
- * is intentional: if the change was triggered because the user suspected
- * compromise, any other live session for them must die too.
+ * On success we issue a FRESH JWT + rotate the CSRF token, so the user
+ * keeps working without having to log in again. This is the friendly choice
+ * for an internal tool. If you ever care about killing zombie sessions on
+ * other devices, switch back to clearAuthCookies(res) here.
  */
 const changePassword = async (req, res, next) => {
   try {
@@ -181,15 +182,22 @@ const changePassword = async (req, res, next) => {
       resourceId:   req.user.id,
     });
 
-    // Force re-login. JWT is stateless so we can't truly "revoke" the old
-    // token, but clearing the cookie removes it from THIS browser.  Any
-    // other device/tab still holding the old JWT will keep working until
-    // its 8h expiry — acceptable for an internal app, document this.
-    clearAuthCookies(res);
+    // Issue a fresh JWT + rotate CSRF so the session stays alive. The
+    // previous JWT remains valid until its expiry (we can't revoke a
+    // stateless token without a denylist) — acceptable for internal use.
+    const freshToken = jwt.sign(
+      { userId: req.user.id, role: req.user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+    );
+    setAuthCookie(res, freshToken);
+    const csrfToken = generateCsrfToken();
+    setCsrfCookie(res, csrfToken);
 
     res.json({
-      ok:      true,
-      message: 'Password changed successfully. Please log in again.',
+      ok:        true,
+      message:   'Password changed successfully',
+      csrfToken,                   // rotated — frontend should adopt for next requests
     });
   } catch (err) {
     next(err);
