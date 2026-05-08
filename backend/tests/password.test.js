@@ -2,7 +2,7 @@
  * Password security policy + change-password flow.
  *
  * Covers:
- *   - validator rules (length, classes, common words, employee_id collision)
+ *   - validator rules (length, whitespace, employee_id collision, no-op change)
  *   - createUser rejects weak passwords (admin path)
  *   - change-password: success, wrong current, weak new, same as current
  *   - audit rows created for both success + failure
@@ -19,45 +19,27 @@ const { waitForAuditRow } = require('./helpers/audit');
 const { validatePassword, POLICY } = require('../src/utils/password');
 
 describe('validatePassword (unit)', () => {
-  it('accepts a strong password', () => {
-    const r = validatePassword('Strong#Pass123');
+  it('accepts an 8-char lowercase-only password (relaxed policy)', () => {
+    const r = validatePassword('mydogfido');
     expect(r.ok).toBe(true);
     expect(r.errors).toEqual([]);
   });
 
+  it('accepts a passphrase', () => {
+    const r = validatePassword('correct horse battery staple');
+    expect(r.ok).toBe(true);
+  });
+
   it('rejects too short', () => {
-    const r = validatePassword('Aa1!');
+    const r = validatePassword('short');
     expect(r.ok).toBe(false);
     expect(r.errors.join(' ')).toMatch(/at least/);
-  });
-
-  it('rejects missing uppercase', () => {
-    const r = validatePassword('lowercase1!');
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(' ')).toMatch(/uppercase/);
-  });
-
-  it('rejects missing digit', () => {
-    const r = validatePassword('NoDigits!@#');
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(' ')).toMatch(/digit/);
-  });
-
-  it('rejects missing symbol', () => {
-    const r = validatePassword('NoSymbol123');
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(' ')).toMatch(/symbol/);
   });
 
   it('rejects all-whitespace', () => {
     const r = validatePassword('        ');
     expect(r.ok).toBe(false);
-  });
-
-  it('rejects common passwords even when they look strong', () => {
-    const r = validatePassword('Password1!');
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(' ')).toMatch(/common/i);
+    expect(r.errors.join(' ')).toMatch(/whitespace/i);
   });
 
   it('rejects password equal to employee_id', () => {
@@ -67,23 +49,19 @@ describe('validatePassword (unit)', () => {
   });
 
   it('rejects new password equal to current', () => {
-    const r = validatePassword('Same#Pass1', { currentPassword: 'Same#Pass1' });
+    const r = validatePassword('samepass', { currentPassword: 'samepass' });
     expect(r.ok).toBe(false);
     expect(r.errors.join(' ')).toMatch(/differ/i);
   });
 
   it('exposes a frozen POLICY object', () => {
-    expect(POLICY).toMatchObject({
-      minLength: 8,
-      requireUppercase: true,
-      requireSymbol:    true,
-    });
+    expect(POLICY).toMatchObject({ minLength: 8, maxLength: 128 });
     expect(() => { POLICY.minLength = 1; }).toThrow();
   });
 });
 
-describe('POST /api/users — admin create with policy enforcement', () => {
-  it('rejects weak password (400)', async () => {
+describe('POST /api/users — admin create with length-only policy', () => {
+  it('rejects too-short password (400)', async () => {
     const { agent, csrf } = await loginAs(app, CREDS.admin);
     const res = await agent
       .post('/api/users')
@@ -92,31 +70,31 @@ describe('POST /api/users — admin create with policy enforcement', () => {
         employee_id: 'WEAK-001',
         name:        'Weak',
         email:       'weak@test.local',
-        password:    'weakpass',           // missing upper/digit/symbol
+        password:    'short',              // 5 chars
       });
     expect(res.status).toBe(400);
     expect(res.body.errors).toEqual(expect.any(Array));
   });
 
-  it('accepts strong password (201)', async () => {
+  it('accepts an 8-char password (201) — no class requirements', async () => {
     const { agent, csrf } = await loginAs(app, CREDS.admin);
     const res = await agent
       .post('/api/users')
       .set('X-CSRF-Token', csrf)
       .send({
-        employee_id: 'STRONG-001',
-        name:        'Strong',
-        email:       'strong@test.local',
-        password:    'Strong#Pass123',
+        employee_id: 'OK-001',
+        name:        'Eight Chars',
+        email:       'ok@test.local',
+        password:    'mydogfido',
       });
     expect(res.status).toBe(201);
   });
 });
 
 describe('POST /api/auth/change-password', () => {
-  const NEW_PASSWORD = 'Brand#New456';
+  const NEW_PASSWORD = 'brandnewpassword';
 
-  it('success: returns 200, audit row written, cookies cleared', async () => {
+  it('success: returns 200 + fresh cookies + audit row', async () => {
     const { agent, csrf } = await loginAs(app, CREDS.user);
 
     const res = await agent
@@ -126,15 +104,15 @@ describe('POST /api/auth/change-password', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
+    expect(res.body.csrfToken).toEqual(expect.any(String));
 
-    // Cookies cleared — Express's clearCookie emits Set-Cookie with an empty
-    // value AND a 1970 Expires. Match the empty value pattern so we don't
-    // accidentally pass on any cookie that merely has an Expires attribute.
+    // The session is rotated, NOT cleared. Both cookies should be re-set
+    // with non-empty values so the user keeps working without re-login.
     const cookies = res.headers['set-cookie'] || [];
-    const authCleared = cookies.find(c => /^auth_token=;/.test(c));
-    const csrfCleared = cookies.find(c => /^csrf_token=;/.test(c));
-    expect(authCleared).toBeDefined();
-    expect(csrfCleared).toBeDefined();
+    const authSet = cookies.find(c => /^auth_token=[^;]+;/.test(c));
+    const csrfSet = cookies.find(c => /^csrf_token=[^;]+;/.test(c));
+    expect(authSet).toBeDefined();
+    expect(csrfSet).toBeDefined();
 
     // Audit row
     const row = await waitForAuditRow({
@@ -144,7 +122,7 @@ describe('POST /api/auth/change-password', () => {
     expect(row.status).toBe('success');
   });
 
-  it('after success the OLD session is invalidated', async () => {
+  it('after success the SAME session keeps working (no forced re-login)', async () => {
     const { agent, csrf } = await loginAs(app, CREDS.user);
 
     await agent
@@ -152,9 +130,11 @@ describe('POST /api/auth/change-password', () => {
       .set('X-CSRF-Token', csrf)
       .send({ current_password: CREDS.user.password, new_password: NEW_PASSWORD });
 
-    // Same agent — its cookies were cleared by the response
+    // The agent picked up the rotated cookie automatically; /me should still
+    // succeed. This is the friendly behaviour for an internal tool.
     const me = await agent.get('/api/auth/me');
-    expect(me.status).toBe(401);
+    expect(me.status).toBe(200);
+    expect(me.body.employee_id).toBe(CREDS.user.employee_id.toUpperCase());
   });
 
   it('after success the NEW password works for login', async () => {
@@ -201,7 +181,7 @@ describe('POST /api/auth/change-password', () => {
     expect(row.metadata.reason).toBe('wrong_current_password');
   });
 
-  it('weak new password → 400 with rule list', async () => {
+  it('too-short new password → 400', async () => {
     const { agent, csrf } = await loginAs(app, CREDS.user);
     const res = await agent
       .post('/api/auth/change-password')
@@ -209,8 +189,7 @@ describe('POST /api/auth/change-password', () => {
       .send({ current_password: CREDS.user.password, new_password: 'weak' });
 
     expect(res.status).toBe(400);
-    expect(res.body.errors).toEqual(expect.any(Array));
-    expect(res.body.errors.length).toBeGreaterThan(1);
+    expect(res.body.error).toMatch(/at least/i);
   });
 
   it('new password equal to current → 400', async () => {
@@ -241,7 +220,7 @@ describe('POST /api/auth/change-password', () => {
     // actual middleware order so a future reorder shows up as a test diff.
     const res = await request(app)
       .post('/api/auth/change-password')
-      .send({ current_password: 'x', new_password: 'StrongP@ss1' });
+      .send({ current_password: 'x', new_password: 'somenewpw' });
     expect(res.status).toBe(403);
   });
 
@@ -255,7 +234,7 @@ describe('POST /api/auth/change-password', () => {
     const res = await agent
       .post('/api/auth/change-password')
       .set('X-CSRF-Token', csrf)
-      .send({ current_password: 'x', new_password: 'StrongP@ss1' });
+      .send({ current_password: 'x', new_password: 'somenewpw' });
     expect(res.status).toBe(401);
   });
 
@@ -272,7 +251,7 @@ describe('POST /api/auth/change-password', () => {
     const res = await agent
       .post('/api/auth/change-password')
       .set('X-CSRF-Token', csrf)
-      .send({ current_password: CREDS.admin.password, new_password: 'Admin#New789' });
+      .send({ current_password: CREDS.admin.password, new_password: 'newadminpw' });
     expect(res.status).toBe(200);
   });
 
