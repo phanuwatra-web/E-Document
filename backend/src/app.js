@@ -55,28 +55,28 @@ app.use(httpLogger);
 // so orchestrators (Docker / K8s) can reach them with no auth or token.
 app.use('/', healthRoutes);
 
-// Rate limits are disabled in tests — otherwise repeated test logins would
-// trip the 15/15min cap and turn passing tests into flaky ones. Production
-// behaviour is unchanged.
+// Rate limits — relaxed for an internal tool. The point isn't to defend
+// against credential-stuffing botnets (intranet, no public exposure) but
+// to catch a misbehaving script or someone bashing their keyboard. Numbers
+// chosen so a normal busy user never trips them.
+//
+// Rate limits are also skipped entirely in tests so repeated logins don't
+// turn passing suites into flaky ones.
 const rateLimitSkip = () => isTest;
 app.use('/api/', rateLimit({
   windowMs: 15 * 60 * 1000,
-  max:      200,
+  max:      500,                        // was 200
   skip:     rateLimitSkip,
 }));
 app.use('/api/auth/login', rateLimit({
   windowMs: 15 * 60 * 1000,
-  max:      15,
+  max:      30,                         // was 15
   message:  { error: 'Too many login attempts. Please try again in 15 minutes.' },
   skip:     rateLimitSkip,
 }));
-
-// Change-password is much stricter — every failure is a brute-force signal
-// against an authenticated session. 5 attempts / 15min / IP is plenty for
-// "I mistyped my old password" while making automated attacks impractical.
 app.use('/api/auth/change-password', rateLimit({
   windowMs: 15 * 60 * 1000,
-  max:      5,
+  max:      20,                         // was 5
   message:  { error: 'Too many password change attempts. Please try again in 15 minutes.' },
   skip:     rateLimitSkip,
 }));
