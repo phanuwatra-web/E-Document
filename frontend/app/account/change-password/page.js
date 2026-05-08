@@ -5,23 +5,16 @@ import Link from 'next/link';
 import Navbar from '@/components/Navbar';
 import api from '@/lib/api';
 
-/* Mirrors backend/src/utils/password.js — keep both in sync. The check runs
-   on every keystroke so the user sees a live checklist instead of submitting
-   blind. The server STILL validates on its own (never trust the client). */
+/* Mirrors backend/src/utils/password.js — keep both in sync. The single
+   rule we surface is "length ≥ 8". Other guards (whitespace-only, equals
+   employee_id, equals current) are validated server-side and shown as
+   error messages — they're edge cases, not things to nag the user about. */
 const checkRules = (pw) => ({
   length: pw.length >= 8,
-  upper:  /[A-Z]/.test(pw),
-  lower:  /[a-z]/.test(pw),
-  digit:  /[0-9]/.test(pw),
-  symbol: /[^A-Za-z0-9]/.test(pw),
 });
 
 const RULE_LABELS = [
   { key: 'length', text: 'อย่างน้อย 8 ตัวอักษร' },
-  { key: 'upper',  text: 'ตัวอักษรพิมพ์ใหญ่ (A-Z)' },
-  { key: 'lower',  text: 'ตัวอักษรพิมพ์เล็ก (a-z)' },
-  { key: 'digit',  text: 'ตัวเลข (0-9)' },
-  { key: 'symbol', text: 'อักขระพิเศษ (เช่น ! @ # $)' },
 ];
 
 export default function ChangePasswordPage() {
