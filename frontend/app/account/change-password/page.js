@@ -56,11 +56,10 @@ export default function ChangePasswordPage() {
         new_password:     form.next,
       });
       setSuccess(true);
-      // Server cleared cookies → next API call will 401. Wipe cached
-      // display data and bounce to login after a short pause so the user
-      // sees the success message.
-      try { localStorage.removeItem('user'); } catch {}
-      setTimeout(() => router.push('/login'), 2000);
+      // Server issued a fresh cookie — session stays alive. Just bounce
+      // back to wherever the user came from after a short success blink.
+      const home = user.role === 'admin' ? '/admin' : '/dashboard';
+      setTimeout(() => router.push(home), 1500);
     } catch (err) {
       // Backend may return either a single error string or a list.
       const data   = err.response?.data;
@@ -86,7 +85,7 @@ export default function ChangePasswordPage() {
             <div className="text-5xl mb-3">✅</div>
             <h2 className="text-lg font-bold text-green-800">Password changed</h2>
             <p className="text-sm text-green-700 mt-2">
-              เปลี่ยนรหัสผ่านสำเร็จ กำลังพาคุณไปยังหน้า login…
+              เปลี่ยนรหัสผ่านสำเร็จ กำลังพากลับไปยังหน้า dashboard…
             </p>
           </div>
         </main>
