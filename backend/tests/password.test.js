@@ -1,0 +1,289 @@
+/**
+ * Password security policy + change-password flow.
+ *
+ * Covers:
+ *   - validator rules (length, classes, common words, employee_id collision)
+ *   - createUser rejects weak passwords (admin path)
+ *   - change-password: success, wrong current, weak new, same as current
+ *   - audit rows created for both success + failure
+ *   - session is invalidated after change (force re-login)
+ *   - new password works for next login, old password no longer does
+ *   - RBAC: anonymous request 401
+ */
+const request = require('supertest');
+const app     = require('../src/app');
+const db      = require('../src/config/database');
+const { CREDS } = require('./fixtures/users');
+const { loginAs } = require('./helpers/auth');
+const { waitForAuditRow } = require('./helpers/audit');
+const { validatePassword, POLICY } = require('../src/utils/password');
+
+describe('validatePassword (unit)', () => {
+  it('accepts a strong password', () => {
+    const r = validatePassword('Strong#Pass123');
+    expect(r.ok).toBe(true);
+    expect(r.errors).toEqual([]);
+  });
+
+  it('rejects too short', () => {
+    const r = validatePassword('Aa1!');
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/at least/);
+  });
+
+  it('rejects missing uppercase', () => {
+    const r = validatePassword('lowercase1!');
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/uppercase/);
+  });
+
+  it('rejects missing digit', () => {
+    const r = validatePassword('NoDigits!@#');
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/digit/);
+  });
+
+  it('rejects missing symbol', () => {
+    const r = validatePassword('NoSymbol123');
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/symbol/);
+  });
+
+  it('rejects all-whitespace', () => {
+    const r = validatePassword('        ');
+    expect(r.ok).toBe(false);
+  });
+
+  it('rejects common passwords even when they look strong', () => {
+    const r = validatePassword('Password1!');
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/common/i);
+  });
+
+  it('rejects password equal to employee_id', () => {
+    const r = validatePassword('TEST-001', { employeeId: 'TEST-001' });
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/employee/i);
+  });
+
+  it('rejects new password equal to current', () => {
+    const r = validatePassword('Same#Pass1', { currentPassword: 'Same#Pass1' });
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/differ/i);
+  });
+
+  it('exposes a frozen POLICY object', () => {
+    expect(POLICY).toMatchObject({
+      minLength: 8,
+      requireUppercase: true,
+      requireSymbol:    true,
+    });
+    expect(() => { POLICY.minLength = 1; }).toThrow();
+  });
+});
+
+describe('POST /api/users — admin create with policy enforcement', () => {
+  it('rejects weak password (400)', async () => {
+    const { agent, csrf } = await loginAs(app, CREDS.admin);
+    const res = await agent
+      .post('/api/users')
+      .set('X-CSRF-Token', csrf)
+      .send({
+        employee_id: 'WEAK-001',
+        name:        'Weak',
+        email:       'weak@test.local',
+        password:    'weakpass',           // missing upper/digit/symbol
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.errors).toEqual(expect.any(Array));
+  });
+
+  it('accepts strong password (201)', async () => {
+    const { agent, csrf } = await loginAs(app, CREDS.admin);
+    const res = await agent
+      .post('/api/users')
+      .set('X-CSRF-Token', csrf)
+      .send({
+        employee_id: 'STRONG-001',
+        name:        'Strong',
+        email:       'strong@test.local',
+        password:    'Strong#Pass123',
+      });
+    expect(res.status).toBe(201);
+  });
+});
+
+describe('POST /api/auth/change-password', () => {
+  const NEW_PASSWORD = 'Brand#New456';
+
+  it('success: returns 200, audit row written, cookies cleared', async () => {
+    const { agent, csrf } = await loginAs(app, CREDS.user);
+
+    const res = await agent
+      .post('/api/auth/change-password')
+      .set('X-CSRF-Token', csrf)
+      .send({ current_password: CREDS.user.password, new_password: NEW_PASSWORD });
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+
+    // Cookies cleared — Express's clearCookie emits Set-Cookie with an empty
+    // value AND a 1970 Expires. Match the empty value pattern so we don't
+    // accidentally pass on any cookie that merely has an Expires attribute.
+    const cookies = res.headers['set-cookie'] || [];
+    const authCleared = cookies.find(c => /^auth_token=;/.test(c));
+    const csrfCleared = cookies.find(c => /^csrf_token=;/.test(c));
+    expect(authCleared).toBeDefined();
+    expect(csrfCleared).toBeDefined();
+
+    // Audit row
+    const row = await waitForAuditRow({
+      action:       'auth.password_change',
+      resourceType: 'user',
+    });
+    expect(row.status).toBe('success');
+  });
+
+  it('after success the OLD session is invalidated', async () => {
+    const { agent, csrf } = await loginAs(app, CREDS.user);
+
+    await agent
+      .post('/api/auth/change-password')
+      .set('X-CSRF-Token', csrf)
+      .send({ current_password: CREDS.user.password, new_password: NEW_PASSWORD });
+
+    // Same agent — its cookies were cleared by the response
+    const me = await agent.get('/api/auth/me');
+    expect(me.status).toBe(401);
+  });
+
+  it('after success the NEW password works for login', async () => {
+    const { agent, csrf } = await loginAs(app, CREDS.user);
+    await agent
+      .post('/api/auth/change-password')
+      .set('X-CSRF-Token', csrf)
+      .send({ current_password: CREDS.user.password, new_password: NEW_PASSWORD });
+
+    const { agent: agent2 } = await loginAs(app, { ...CREDS.user, password: NEW_PASSWORD });
+    const me = await agent2.get('/api/auth/me');
+    expect(me.status).toBe(200);
+  });
+
+  it('after success the OLD password no longer works for login', async () => {
+    const { agent, csrf } = await loginAs(app, CREDS.user);
+    await agent
+      .post('/api/auth/change-password')
+      .set('X-CSRF-Token', csrf)
+      .send({ current_password: CREDS.user.password, new_password: NEW_PASSWORD });
+
+    // Try login with the original password — must fail
+    const fresh = request.agent(app);
+    await fresh.get('/api/auth/csrf-token');
+    const loginRes = await fresh
+      .post('/api/auth/login')
+      .send({ employee_id: CREDS.user.employee_id, password: CREDS.user.password });
+
+    expect(loginRes.status).toBe(401);
+  });
+
+  it('wrong current password → 401 + audit failure', async () => {
+    const { agent, csrf } = await loginAs(app, CREDS.user);
+    const res = await agent
+      .post('/api/auth/change-password')
+      .set('X-CSRF-Token', csrf)
+      .send({ current_password: 'wrong-password', new_password: NEW_PASSWORD });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error).toMatch(/current password is incorrect/i);
+
+    const row = await waitForAuditRow({ action: 'auth.password_change.failure' });
+    expect(row.status).toBe('failure');
+    expect(row.metadata.reason).toBe('wrong_current_password');
+  });
+
+  it('weak new password → 400 with rule list', async () => {
+    const { agent, csrf } = await loginAs(app, CREDS.user);
+    const res = await agent
+      .post('/api/auth/change-password')
+      .set('X-CSRF-Token', csrf)
+      .send({ current_password: CREDS.user.password, new_password: 'weak' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.errors).toEqual(expect.any(Array));
+    expect(res.body.errors.length).toBeGreaterThan(1);
+  });
+
+  it('new password equal to current → 400', async () => {
+    const { agent, csrf } = await loginAs(app, CREDS.user);
+    const res = await agent
+      .post('/api/auth/change-password')
+      .set('X-CSRF-Token', csrf)
+      .send({
+        current_password: CREDS.user.password,
+        new_password:     CREDS.user.password,     // same value
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/differ/i);
+  });
+
+  it('missing fields → 400', async () => {
+    const { agent, csrf } = await loginAs(app, CREDS.user);
+    const res = await agent
+      .post('/api/auth/change-password')
+      .set('X-CSRF-Token', csrf)
+      .send({ current_password: CREDS.user.password });   // no new_password
+    expect(res.status).toBe(400);
+  });
+
+  it('anonymous request without CSRF → 403 (CSRF gate runs first)', async () => {
+    // No cookies, no header → CSRF middleware short-circuits with 403 before
+    // the route's authenticate middleware ever runs. This documents the
+    // actual middleware order so a future reorder shows up as a test diff.
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .send({ current_password: 'x', new_password: 'StrongP@ss1' });
+    expect(res.status).toBe(403);
+  });
+
+  it('with CSRF but no auth → 401 (authenticate gate)', async () => {
+    // Bootstrap a CSRF cookie so we get past the CSRF check, then send the
+    // request WITHOUT logging in. authenticate must reject it with 401.
+    const agent = require('supertest').agent(app);
+    const csrfRes = await agent.get('/api/auth/csrf-token');
+    const csrf    = csrfRes.body.csrfToken;
+
+    const res = await agent
+      .post('/api/auth/change-password')
+      .set('X-CSRF-Token', csrf)
+      .send({ current_password: 'x', new_password: 'StrongP@ss1' });
+    expect(res.status).toBe(401);
+  });
+
+  it('missing CSRF header → 403', async () => {
+    const { agent } = await loginAs(app, CREDS.user);
+    const res = await agent
+      .post('/api/auth/change-password')
+      .send({ current_password: CREDS.user.password, new_password: NEW_PASSWORD });
+    expect(res.status).toBe(403);
+  });
+
+  it('RBAC unaffected — admin can also change own password', async () => {
+    const { agent, csrf } = await loginAs(app, CREDS.admin);
+    const res = await agent
+      .post('/api/auth/change-password')
+      .set('X-CSRF-Token', csrf)
+      .send({ current_password: CREDS.admin.password, new_password: 'Admin#New789' });
+    expect(res.status).toBe(200);
+  });
+
+  it('does not leak password_hash anywhere in the response', async () => {
+    const { agent, csrf } = await loginAs(app, CREDS.user);
+    const res = await agent
+      .post('/api/auth/change-password')
+      .set('X-CSRF-Token', csrf)
+      .send({ current_password: CREDS.user.password, new_password: NEW_PASSWORD });
+    const body = JSON.stringify(res.body);
+    expect(body).not.toMatch(/\$2[aby]\$/);   // bcrypt hash prefix
+    expect(body).not.toMatch(/password_hash/);
+  });
+});

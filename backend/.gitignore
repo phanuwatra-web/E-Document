@@ -1,0 +1,15 @@
+# Backend-specific ignores (root .gitignore covers most of it).
+# Keeping this file means `git init` inside backend/ alone still gets the
+# right rules for stand-alone work.
+
+node_modules/
+.env
+.env.*
+!.env.example
+!.env.test.example
+
+uploads/*
+!uploads/.gitkeep
+
+coverage/
+*.log

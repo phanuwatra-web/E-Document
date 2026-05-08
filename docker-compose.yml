@@ -1,0 +1,119 @@
+# docker-compose.yml — Production deployment template
+# ─────────────────────────────────────────────────────────────────────
+# Usage:
+#   cp .env.example .env
+#   # edit .env and set POSTGRES_PASSWORD and JWT_SECRET (REQUIRED)
+#   docker compose up -d --build
+#
+# Stop:
+#   docker compose down            (keep data)
+#   docker compose down -v         (also remove volumes — destructive!)
+# ─────────────────────────────────────────────────────────────────────
+
+services:
+  # ===== PostgreSQL =====================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: docsign-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-docsign}
+      POSTGRES_USER:     ${POSTGRES_USER:-docsign}
+      # `:?` means: fail compose start with an error if unset — never let a
+      # blank password go to production by accident.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      # Persistent volume for all DB data — survives `docker compose down`.
+      - postgres-data:/var/lib/postgresql/data
+      # Auto-applied on first boot of a fresh volume only. If you need to
+      # re-apply schema on an existing volume, run the backend's migrate
+      # script (idempotent) or `npm run migrate` from a host shell.
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-docsign} -d ${POSTGRES_DB:-docsign}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [docsign-net]
+
+  # ===== Backend (Express API) ==========================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docsign-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV:        ${NODE_ENV:-production}
+      PORT:            5000
+      # Internal DNS: `postgres` resolves on the docsign-net bridge to the
+      # container above. Never exposed to the host or the internet.
+      DATABASE_URL:    postgresql://${POSTGRES_USER:-docsign}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-docsign}
+      JWT_SECRET:      ${JWT_SECRET:?JWT_SECRET is required, generate with `openssl rand -hex 32`}
+      JWT_EXPIRES_IN:  ${JWT_EXPIRES_IN:-8h}
+      FRONTEND_URL:    ${FRONTEND_URL:-http://localhost:3000}
+      SMTP_HOST:       ${SMTP_HOST:-smtp.office365.com}
+      SMTP_PORT:       ${SMTP_PORT:-587}
+      SMTP_SECURE:     ${SMTP_SECURE:-false}
+      SMTP_USER:       ${SMTP_USER:-}
+      SMTP_PASS:       ${SMTP_PASS:-}
+      LOG_LEVEL:       ${LOG_LEVEL:-info}
+      TRUST_PROXY:     ${TRUST_PROXY:-1}
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}
+      # Graceful shutdown — see .env.example for tuning notes.
+      SHUTDOWN_DRAIN_DELAY_MS:    ${SHUTDOWN_DRAIN_DELAY_MS:-5000}
+      SHUTDOWN_REQUEST_TIMEOUT_MS: ${SHUTDOWN_REQUEST_TIMEOUT_MS:-10000}
+      SHUTDOWN_DB_TIMEOUT_MS:     ${SHUTDOWN_DB_TIMEOUT_MS:-5000}
+      SHUTDOWN_FORCE_EXIT_MS:     ${SHUTDOWN_FORCE_EXIT_MS:-20000}
+    volumes:
+      # Persistent uploads — PDFs survive container rebuilds.
+      - backend-uploads:/app/uploads
+    ports:
+      # Exposed because the SPA in the browser fetches it directly.
+      # In real production behind a reverse proxy, drop this and reach the
+      # backend over the internal network only.
+      - "${BACKEND_PORT:-5000}:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy   # waits for pg_isready, not just port-open
+    # Give the graceful-shutdown manager time to drain. Compose's default is
+    # 10s — which would SIGKILL us mid-drain. 30s comfortably exceeds the
+    # SHUTDOWN_FORCE_EXIT_MS hard ceiling above.
+    stop_grace_period: 30s
+    networks: [docsign-net]
+
+  # ===== Frontend (Next.js) =============================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Inlined into the client bundle at BUILD time — must be the URL
+        # the BROWSER will use, not the internal docker-DNS name.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5000/api}
+    container_name: docsign-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT:     3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [docsign-net]
+
+# ===== Volumes ============================================================
+volumes:
+  postgres-data:
+    name: docsign-postgres-data
+  backend-uploads:
+    name: docsign-backend-uploads
+
+# ===== Networks ===========================================================
+networks:
+  docsign-net:
+    name: docsign-net
+    driver: bridge

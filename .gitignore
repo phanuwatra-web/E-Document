@@ -1,0 +1,32 @@
+# ===== Secrets (NEVER commit) =====
+.env
+.env.*
+!.env.example
+!.env.test.example
+
+# ===== Node =====
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== Builds / outputs =====
+.next/
+out/
+build/
+dist/
+coverage/
+
+# ===== Application data =====
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# ===== IDE / OS =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ===== Compose overrides (developer-local) =====
+docker-compose.override.yml

@@ -1,0 +1,36 @@
+# docker-compose.override.yml — LOCAL DEV TEMPLATE
+# ─────────────────────────────────────────────────────────────────────
+# Copy to docker-compose.override.yml to enable. Compose auto-loads
+# this file on top of docker-compose.yml. Use it for plain-HTTP local
+# testing without provisioning TLS.
+#
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#
+# What it does:
+#   - Forces NODE_ENV=development → backend issues non-Secure cookies so
+#     they survive plain HTTP localhost.
+#   - Switches log output to pretty-printed (pino-pretty).
+#   - Mounts source folders for live reload (uncomment the volumes block).
+# ─────────────────────────────────────────────────────────────────────
+
+services:
+  backend:
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+    # Uncomment to live-reload (also remove `--omit=dev` from Dockerfile):
+    # volumes:
+    #   - ./backend/src:/app/src
+    # command: ["npm", "run", "dev"]
+
+  frontend:
+    environment:
+      NODE_ENV: development
+    # Uncomment for `next dev` HMR:
+    # build:
+    #   args:
+    #     NEXT_PUBLIC_API_URL: http://localhost:5000/api
+    # volumes:
+    #   - ./frontend/app:/app/app
+    #   - ./frontend/components:/app/components
+    # command: ["npm", "run", "dev"]

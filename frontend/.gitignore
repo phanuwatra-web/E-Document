@@ -1,0 +1,15 @@
+node_modules/
+.next/
+out/
+build/
+
+# Local env — only the .example files belong in git
+.env
+.env.*
+!.env.local.example
+
+# Test/coverage artefacts
+coverage/
+
+# Logs
+*.log

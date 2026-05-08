@@ -1,0 +1,49 @@
+# GitHub Actions — runs the integration test suite against a real Postgres
+# spun up as a service container. Mirrors what `npm test` does locally.
+name: backend tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB:       docsign_test
+          POSTGRES_USER:     docsign
+          POSTGRES_PASSWORD: ci_only_password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U docsign -d docsign_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      NODE_ENV:     test
+      LOG_LEVEL:    silent
+      DATABASE_URL: postgresql://docsign:ci_only_password@localhost:5432/docsign_test
+      JWT_SECRET:   ci-test-secret-at-least-32-characters-long-for-safety
+      FRONTEND_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+      - run: npm test

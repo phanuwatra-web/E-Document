@@ -1,0 +1,20 @@
+node_modules
+.next
+out
+
+# Local env (NEXT_PUBLIC_API_URL is passed via docker build --build-arg instead)
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+README.md
+*.md
+
+.dockerignore
+Dockerfile

@@ -1,0 +1,27 @@
+# Build artefacts & deps — re-installed inside the image, never copied from host
+node_modules
+npm-debug.log*
+
+# Local secrets — must NEVER end up baked into the image layer
+.env
+.env.*
+!.env.example
+
+# VCS / IDE / OS noise
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# Project clutter that is irrelevant at runtime
+README.md
+*.md
+
+# Don't ship existing local uploads into the image — the volume handles them
+uploads/*
+!uploads/.gitkeep
+
+# Self-reference
+.dockerignore
+Dockerfile
