@@ -16,8 +16,9 @@ const authRoutes      = require('./routes/auth.routes');
 const documentRoutes  = require('./routes/document.routes');
 const signatureRoutes = require('./routes/signature.routes');
 const userRoutes      = require('./routes/user.routes');
-const auditRoutes     = require('./routes/audit.routes');
-const healthRoutes    = require('./routes/health.routes');
+const auditRoutes        = require('./routes/audit.routes');
+const notificationRoutes = require('./routes/notification.routes');
+const healthRoutes       = require('./routes/health.routes');
 const errorHandler    = require('./middleware/errorHandler');
 const httpLogger      = require('./middleware/requestLogger');
 const { csrfProtection } = require('./middleware/csrf');
@@ -96,7 +97,8 @@ app.use('/api/auth',       authRoutes);
 app.use('/api/documents',  documentRoutes);
 app.use('/api/signatures', signatureRoutes);
 app.use('/api/users',      userRoutes);
-app.use('/api/audit-logs', auditRoutes);
+app.use('/api/audit-logs',     auditRoutes);
+app.use('/api/notifications',  notificationRoutes);
 
 app.use(errorHandler);
 
