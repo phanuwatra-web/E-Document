@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const {
-  login, loginValidation, getMe, getCsrfToken, logout, changePassword,
+  login, loginValidation, getMe, getCsrfToken, logout, changePassword, acceptPrivacy,
 } = require('../controllers/auth.controller');
 const { authenticate } = require('../middleware/auth');
 
@@ -14,5 +14,6 @@ router.post('/login', loginValidation, login);
 router.get('/me',               authenticate, getMe);
 router.post('/logout',          authenticate, logout);
 router.post('/change-password', authenticate, changePassword);
+router.post('/accept-privacy',  authenticate, acceptPrivacy);
 
 module.exports = router;
