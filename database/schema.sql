@@ -64,6 +64,11 @@ ALTER TABLE signatures ADD COLUMN IF NOT EXISTS x_pct     NUMERIC(5,4) NOT NULL 
 ALTER TABLE signatures ADD COLUMN IF NOT EXISTS y_pct     NUMERIC(5,4) NOT NULL DEFAULT 0.10;
 ALTER TABLE signatures ADD COLUMN IF NOT EXISTS width_pct NUMERIC(5,4) NOT NULL DEFAULT 0.22;
 
+-- PDPA / data-subject consent timestamp. NULL = user has not yet accepted
+-- the current Privacy Notice; the SPA shows a consent modal until they do.
+-- Bumping the policy version means clearing this column forces re-acceptance.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_accepted_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_users_employee_id   ON users(employee_id);
 CREATE INDEX IF NOT EXISTS idx_users_department    ON users(department_id);
 CREATE INDEX IF NOT EXISTS idx_documents_dept      ON documents(department_id);
