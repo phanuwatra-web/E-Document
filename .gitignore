@@ -22,6 +22,11 @@ coverage/
 backend/uploads/*
 !backend/uploads/.gitkeep
 
+# ===== Backups (never commit dumps to git) =====
+backups/
+*.dump
+*.tar.gz
+
 # ===== IDE / OS =====
 .vscode/
 .idea/
