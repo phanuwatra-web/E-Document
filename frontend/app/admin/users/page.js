@@ -6,9 +6,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
   ArrowLeft, Plus, Pencil, KeyRound, Power, Trash2, X, Loader2,
-  Users as UsersIcon, Search, Shield, Mail, IdCard, Lock, Building2,
+  Users as UsersIcon, Search, Shield, Mail, Hash, Lock, Building2,
 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
+import Pagination from '@/components/Pagination';
 import api from '@/lib/api';
 
 const RoleBadge = ({ role }) => (
@@ -63,6 +64,8 @@ export default function UsersPage() {
   const [editError,   setEditError]   = useState('');
   const [editSaving,  setEditSaving]  = useState(false);
   const [search,      setSearch]      = useState('');
+  const [page,        setPage]        = useState(1);
+  const LIMIT = 20;
 
   useEffect(() => {
     const u = localStorage.getItem('user');
@@ -191,6 +194,10 @@ export default function UsersPage() {
     );
   }, [users, search]);
 
+  useEffect(() => { setPage(1); }, [search]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / LIMIT));
+  const pageItems  = filtered.slice((page - 1) * LIMIT, page * LIMIT);
+
   const stats = useMemo(() => ({
     total:    users.length,
     admins:   users.filter(u => u.role === 'admin').length,
@@ -240,7 +247,7 @@ export default function UsersPage() {
                   <p className="text-red-600 text-sm mb-4 bg-red-50 px-3 py-2 rounded-lg">{formError}</p>
                 )}
                 <form onSubmit={handleCreate} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field icon={IdCard} label="Employee ID" value={form.employee_id}
+                  <Field icon={Hash} label="Employee ID" value={form.employee_id}
                     onChange={v => setForm({ ...form, employee_id: v.toUpperCase() })}
                     placeholder="EMP-009" required />
                   <Field icon={UsersIcon} label="ชื่อ-นามสกุล" value={form.name}
@@ -303,7 +310,7 @@ export default function UsersPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filtered.map(u => (
+                    {pageItems.map(u => (
                       <tr key={u.id} className="hover:bg-slate-50 transition-colors">
                         <td className="px-5 py-3">
                           <div className="flex items-center gap-3">
@@ -336,6 +343,12 @@ export default function UsersPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {filtered.length > LIMIT && (
+              <div className="px-5 py-3 border-t border-slate-100">
+                <Pagination page={page} totalPages={totalPages} total={filtered.length} limit={LIMIT}
+                  onPageChange={setPage} />
               </div>
             )}
           </div>
