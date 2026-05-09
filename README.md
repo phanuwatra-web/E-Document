@@ -43,6 +43,29 @@ docsign/
     └── lib/api.js
 ```
 
+## Backup & Restore
+
+```bash
+# Daily snapshot (run on the docker-compose host)
+./scripts/backup.sh                  # → ./backups/docsign_<ts>.dump + uploads_<ts>.tar.gz
+
+# List & restore from a specific snapshot
+./scripts/restore.sh                  # shows available timestamps
+./scripts/restore.sh 2026-05-08_03-30-00
+```
+
+Schedule daily via cron on the server:
+```cron
+30 3 * * *   cd /opt/docsign && ./scripts/backup.sh >> /var/log/docsign-backup.log 2>&1
+```
+
+`backup.sh` auto-prunes files older than `RETENTION_DAYS` (default 30).
+Override per-run: `RETENTION_DAYS=90 ./scripts/backup.sh`.
+
+**Always test restore at least once** before treating any backup pipeline
+as trusted — restore.sh asks for `YES` confirmation because it overwrites
+live data.
+
 ## Tests
 
 ```bash
