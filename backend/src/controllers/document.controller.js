@@ -65,6 +65,19 @@ const uploadDocument = async (req, res, next) => {
 
       await client.query('COMMIT');
 
+      audit.log({
+        req,
+        action:       audit.ACTIONS.DOCUMENT_UPLOAD,
+        resourceType: 'document',
+        resourceId:   document.id,
+        metadata: {
+          title:           document.title,
+          department_id:   document.department_id,
+          file_size:       document.file_size,
+          assignee_count:  usersResult.rows.length,
+        },
+      });
+
       if (usersResult.rows.length > 0) {
         emailService.notifyNewDocument(document, usersResult.rows).catch(err => {
           // Use the request-scoped logger so the failure shares reqId with
@@ -97,40 +110,64 @@ const uploadDocument = async (req, res, next) => {
   }
 };
 
+// Opt-in pagination — pass ?page=1&limit=20 to get { items, total, page, limit, totalPages }.
+// Without page param → returns array (legacy shape) so stats/charts can compute over all docs.
+// Cap limit at 200 so a malformed request can't ask for the whole table.
 const getDocuments = async (req, res, next) => {
   try {
-    let query, params;
+    const wantsPaginated = req.query.page !== undefined;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
 
-    if (req.user.role === 'admin') {
-      query = `
-        SELECT d.*,
-               dept.name AS department_name,
-               u.name    AS uploaded_by_name,
-               COUNT(da.id)                                          AS total_assignees,
-               COUNT(da.id) FILTER (WHERE da.status = 'signed')     AS signed_count
-        FROM documents d
-        LEFT JOIN departments dept ON d.department_id = dept.id
-        LEFT JOIN users u          ON d.uploaded_by   = u.id
-        LEFT JOIN document_assignments da ON d.id = da.document_id
-        GROUP BY d.id, dept.name, u.name
-        ORDER BY d.created_at DESC`;
-      params = [];
-    } else {
-      query = `
-        SELECT d.*,
-               dept.name AS department_name,
-               u.name    AS uploaded_by_name,
-               da.status AS my_status
-        FROM documents d
-        LEFT JOIN departments dept ON d.department_id = dept.id
-        LEFT JOIN users u          ON d.uploaded_by   = u.id
-        JOIN document_assignments da ON d.id = da.document_id AND da.user_id = $1
-        ORDER BY d.created_at DESC`;
-      params = [req.user.id];
+    const isAdmin = req.user.role === 'admin';
+
+    const baseSql = isAdmin
+      ? `SELECT d.*,
+                dept.name AS department_name,
+                u.name    AS uploaded_by_name,
+                COUNT(da.id)                                          AS total_assignees,
+                COUNT(da.id) FILTER (WHERE da.status = 'signed')     AS signed_count
+         FROM documents d
+         LEFT JOIN departments dept ON d.department_id = dept.id
+         LEFT JOIN users u          ON d.uploaded_by   = u.id
+         LEFT JOIN document_assignments da ON d.id = da.document_id
+         GROUP BY d.id, dept.name, u.name
+         ORDER BY d.created_at DESC`
+      : `SELECT d.*,
+                dept.name AS department_name,
+                u.name    AS uploaded_by_name,
+                da.status AS my_status
+         FROM documents d
+         LEFT JOIN departments dept ON d.department_id = dept.id
+         LEFT JOIN users u          ON d.uploaded_by   = u.id
+         JOIN document_assignments da ON d.id = da.document_id AND da.user_id = $1
+         ORDER BY d.created_at DESC`;
+
+    if (!wantsPaginated) {
+      const params = isAdmin ? [] : [req.user.id];
+      const result = await db.query(baseSql, params);
+      return res.json(result.rows);
     }
 
-    const result = await db.query(query, params);
-    res.json(result.rows);
+    const countSql = isAdmin
+      ? `SELECT COUNT(*)::int AS n FROM documents`
+      : `SELECT COUNT(*)::int AS n FROM document_assignments WHERE user_id = $1`;
+    const countParams = isAdmin ? [] : [req.user.id];
+    const countRes = await db.query(countSql, countParams);
+    const total = countRes.rows[0].n;
+
+    const pagedSql = isAdmin ? `${baseSql} LIMIT $1 OFFSET $2` : `${baseSql} LIMIT $2 OFFSET $3`;
+    const params   = isAdmin ? [limit, offset] : [req.user.id, limit, offset];
+
+    const result = await db.query(pagedSql, params);
+    res.json({
+      items:      result.rows,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    });
   } catch (err) {
     next(err);
   }
@@ -291,7 +328,7 @@ const deleteDocument = async (req, res, next) => {
   try {
     const { id } = req.params;
     const result = await db.query(
-      'DELETE FROM documents WHERE id = $1 RETURNING file_path',
+      'DELETE FROM documents WHERE id = $1 RETURNING file_path, title',
       [id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Document not found' });
@@ -306,6 +343,14 @@ const deleteDocument = async (req, res, next) => {
           'orphaned file after document deletion — manual cleanup required'
         );
       }
+    });
+
+    audit.log({
+      req,
+      action:       audit.ACTIONS.DOCUMENT_DELETE,
+      resourceType: 'document',
+      resourceId:   parseInt(id),
+      metadata:     { title: result.rows[0].title },
     });
 
     res.json({ ok: true, message: 'Document deleted successfully' });
