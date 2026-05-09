@@ -7,7 +7,10 @@ import { toast } from 'sonner';
 import {
   ArrowLeft, Plus, Pencil, KeyRound, Power, Trash2, X, Loader2,
   Users as UsersIcon, Search, Shield, Mail, Hash, Lock, Building2,
+  FileSpreadsheet,
 } from 'lucide-react';
+import { format } from 'date-fns';
+import { exportToExcel, timestampedFilename } from '@/lib/exportExcel';
 import Navbar from '@/components/Navbar';
 import Pagination from '@/components/Pagination';
 import api from '@/lib/api';
@@ -166,6 +169,29 @@ export default function UsersPage() {
     }
   };
 
+  const handleExport = () => {
+    try {
+      const rows = filtered.map(u => ({
+        'รหัสพนักงาน':   u.employee_id,
+        'ชื่อ-นามสกุล':  u.name,
+        'อีเมล':         u.email,
+        'แผนก':          u.department_name || '',
+        'บทบาท':         u.role,
+        'สถานะ':         u.is_active ? 'Active' : 'Inactive',
+        'วันที่สร้าง':   u.created_at ? format(new Date(u.created_at), 'yyyy-MM-dd') : '',
+      }));
+      exportToExcel({
+        filename:    timestampedFilename('users'),
+        sheetName:   'Users',
+        rows,
+        columnWidths: [14, 24, 28, 16, 10, 12, 14],
+      });
+      toast.success(`Export ${rows.length} ผู้ใช้สำเร็จ`);
+    } catch (err) {
+      toast.error(err.message || 'Export ไม่สำเร็จ');
+    }
+  };
+
   const handleCreate = async (e) => {
     e.preventDefault();
     setFormError('');
@@ -223,9 +249,16 @@ export default function UsersPage() {
               {stats.total} คน · {stats.admins} admin · {stats.active} active
             </p>
           </div>
-          <button onClick={() => setShowForm(!showForm)} className="btn-primary">
-            <Plus size={16} /> เพิ่มผู้ใช้ใหม่
-          </button>
+          <div className="flex gap-2">
+            <button onClick={handleExport} disabled={users.length === 0}
+              className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+              title="ดาวน์โหลด Excel">
+              <FileSpreadsheet size={16} /> Export
+            </button>
+            <button onClick={() => setShowForm(!showForm)} className="btn-primary">
+              <Plus size={16} /> เพิ่มผู้ใช้ใหม่
+            </button>
+          </div>
         </div>
 
         <AnimatePresence>
