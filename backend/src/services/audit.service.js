@@ -20,6 +20,7 @@ const ACTIONS = Object.freeze({
   LOGIN_FAILURE:           'auth.login.failure',
   PASSWORD_CHANGE:         'auth.password_change',
   PASSWORD_CHANGE_FAILURE: 'auth.password_change.failure',
+  PRIVACY_ACCEPTED:        'auth.privacy_accepted',
 
   // Document
   DOCUMENT_UPLOAD:         'document.upload',
@@ -36,6 +37,8 @@ const ACTIONS = Object.freeze({
   USER_CREATE:             'user.create',
   USER_DELETE:             'user.delete',
   USER_TOGGLE:             'user.toggle',
+  USER_UPDATE:             'user.update',
+  USER_RESET_PASSWORD:     'user.reset_password',
 });
 
 /**
