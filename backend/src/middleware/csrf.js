@@ -21,9 +21,12 @@ const crypto = require('crypto');
 const { CSRF_COOKIE } = require('../utils/cookies');
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+// Paths are relative to the middleware's mount point (/api/) — express strips
+// the mount prefix from req.path. Listing them WITHOUT the /api prefix is
+// what actually matches; using full paths here is a silent no-op.
 const EXEMPT_PATHS = new Set([
-  '/api/auth/login',
-  '/api/auth/csrf-token',
+  '/auth/login',
+  '/auth/csrf-token',
 ]);
 
 const csrfProtection = (req, res, next) => {
