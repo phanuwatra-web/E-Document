@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { FileSignature, LayoutDashboard, Upload, Users, KeyRound, LogOut } from 'lucide-react';
+import NotificationBell from './NotificationBell';
 import api from '@/lib/api';
 
 export default function Navbar({ user }) {
@@ -65,6 +66,7 @@ export default function Navbar({ user }) {
               </p>
             </div>
           </div>
+          {user && <NotificationBell />}
           <Link href="/account/change-password"
             className="p-2 rounded-md text-blue-200 hover:text-white hover:bg-white/5 transition-colors"
             title="Change password">
