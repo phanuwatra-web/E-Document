@@ -2,20 +2,69 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
+import {
+  ArrowLeft, Lock, Eye, EyeOff, Check, X as XIcon,
+  KeyRound, Loader2, ShieldCheck, AlertCircle,
+} from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import api from '@/lib/api';
 
-/* Mirrors backend/src/utils/password.js — keep both in sync. The single
-   rule we surface is "length ≥ 8". Other guards (whitespace-only, equals
-   employee_id, equals current) are validated server-side and shown as
-   error messages — they're edge cases, not things to nag the user about. */
 const checkRules = (pw) => ({
   length: pw.length >= 8,
+  notWhitespace: pw.length > 0 && pw.trim().length > 0,
 });
 
 const RULE_LABELS = [
-  { key: 'length', text: 'อย่างน้อย 8 ตัวอักษร' },
+  { key: 'length',         text: 'อย่างน้อย 8 ตัวอักษร' },
+  { key: 'notWhitespace',  text: 'ไม่ใช่ช่องว่างทั้งหมด' },
 ];
+
+// Strength meter — heuristic based on length + character variety
+const strengthOf = (pw) => {
+  if (!pw) return { score: 0, label: '', color: 'bg-slate-200' };
+  let score = 0;
+  if (pw.length >= 8)  score++;
+  if (pw.length >= 12) score++;
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+  if (/\d/.test(pw))   score++;
+  if (/[^a-zA-Z0-9]/.test(pw)) score++;
+  const map = [
+    { label: 'อ่อนมาก', color: 'bg-red-500',     width: 'w-1/5' },
+    { label: 'อ่อน',    color: 'bg-orange-500',  width: 'w-2/5' },
+    { label: 'พอใช้',   color: 'bg-amber-500',   width: 'w-3/5' },
+    { label: 'ดี',      color: 'bg-lime-500',    width: 'w-4/5' },
+    { label: 'แข็งแรง',  color: 'bg-emerald-500', width: 'w-full' },
+  ];
+  return { score, ...map[Math.min(score, 5) - 1] || map[0] };
+};
+
+const PasswordField = ({ label, value, onChange, onFocus, autoComplete, required, error }) => {
+  const [show, setShow] = useState(false);
+  return (
+    <div>
+      <label className="block text-sm font-semibold text-slate-700 mb-1.5">{label}</label>
+      <div className="relative">
+        <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+        <input
+          type={show ? 'text' : 'password'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={onFocus}
+          className={`w-full pl-9 pr-10 py-2.5 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-500
+            ${error ? 'border-red-300' : 'border-slate-300'}`}
+          autoComplete={autoComplete}
+          required={required}
+        />
+        <button type="button" onClick={() => setShow(s => !s)}
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded">
+          {show ? <EyeOff size={15} /> : <Eye size={15} />}
+        </button>
+      </div>
+    </div>
+  );
+};
 
 export default function ChangePasswordPage() {
   const router = useRouter();
@@ -36,6 +85,7 @@ export default function ChangePasswordPage() {
   const allRulesPass = Object.values(rules).every(Boolean);
   const matches      = form.next.length > 0 && form.next === form.confirm;
   const canSubmit    = form.current && allRulesPass && matches && !submitting;
+  const strength     = strengthOf(form.next);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -49,19 +99,17 @@ export default function ChangePasswordPage() {
         new_password:     form.next,
       });
       setSuccess(true);
-      // Server issued a fresh cookie — session stays alive. Just bounce
-      // back to wherever the user came from after a short success blink.
+      toast.success('เปลี่ยนรหัสผ่านสำเร็จ');
       const home = user.role === 'admin' ? '/admin' : '/dashboard';
       setTimeout(() => router.push(home), 1500);
     } catch (err) {
-      // Backend may return either a single error string or a list.
       const data   = err.response?.data;
       const errors = data?.errors;
-      setError(
-        Array.isArray(errors) && errors.length > 1
-          ? errors.join(' · ')
-          : (data?.error || 'Failed to change password')
-      );
+      const msg = Array.isArray(errors) && errors.length > 1
+        ? errors.join(' · ')
+        : (data?.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ');
+      setError(msg);
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
@@ -71,118 +119,130 @@ export default function ChangePasswordPage() {
 
   if (success) {
     return (
-      <div className="min-h-screen bg-gray-100">
+      <div className="min-h-screen">
         <Navbar user={user} />
         <main className="max-w-md mx-auto px-4 py-16">
-          <div className="bg-green-50 border border-green-200 rounded-xl p-8 text-center">
-            <div className="text-5xl mb-3">✅</div>
-            <h2 className="text-lg font-bold text-green-800">Password changed</h2>
-            <p className="text-sm text-green-700 mt-2">
-              เปลี่ยนรหัสผ่านสำเร็จ กำลังพากลับไปยังหน้า dashboard…
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+            className="card p-8 text-center bg-gradient-to-br from-emerald-50 to-emerald-100 border-emerald-200">
+            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.2, type: 'spring' }}
+              className="w-16 h-16 bg-emerald-500 rounded-full grid place-items-center mx-auto mb-4 shadow-lg shadow-emerald-300/40">
+              <Check className="text-white" size={36} strokeWidth={3} />
+            </motion.div>
+            <h2 className="text-lg font-bold text-emerald-900">เปลี่ยนรหัสผ่านสำเร็จ</h2>
+            <p className="text-sm text-emerald-800 mt-2">
+              กำลังพากลับสู่หน้าหลัก…
             </p>
-          </div>
+          </motion.div>
         </main>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen">
       <Navbar user={user} />
-      <main className="max-w-md mx-auto px-4 py-10">
+      <main className="max-w-md mx-auto px-4 sm:px-6 py-6 sm:py-10">
         <Link href={user.role === 'admin' ? '/admin' : '/dashboard'}
-              className="text-blue-700 text-sm hover:underline">
-          ← Back
+          className="inline-flex items-center gap-1.5 text-brand-700 text-sm hover:underline mb-4">
+          <ArrowLeft size={14} /> กลับ
         </Link>
 
-        <div className="bg-white rounded-xl shadow-sm p-6 mt-4">
-          <h1 className="text-xl font-bold text-gray-900 mb-1">Change Password</h1>
-          <p className="text-sm text-gray-500 mb-6">
-            หลังเปลี่ยนรหัสผ่านสำเร็จ ระบบจะให้คุณ login ใหม่
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="card p-6">
+          <div className="flex items-center gap-3 mb-1">
+            <div className="p-2 bg-brand-100 rounded-lg">
+              <KeyRound className="text-brand-700" size={20} />
+            </div>
+            <h1 className="text-xl font-bold text-slate-900">เปลี่ยนรหัสผ่าน</h1>
+          </div>
+          <p className="text-sm text-slate-500 mb-6 ml-12">
+            หลังเปลี่ยนรหัสผ่าน session ปัจจุบันยังใช้ได้ต่อ
           </p>
 
           {error && (
-            <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-              {error}
-            </div>
+            <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }}
+              className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-start gap-2">
+              <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+              <span>{error}</span>
+            </motion.div>
           )}
 
           <form onSubmit={submit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Current password
-              </label>
-              <input
-                type="password"
-                value={form.current}
-                onChange={(e) => setForm({ ...form, current: e.target.value })}
-                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm
-                           focus:ring-2 focus:ring-blue-500 outline-none"
-                autoComplete="current-password"
-                required
-              />
-            </div>
+            <PasswordField label="รหัสผ่านปัจจุบัน" value={form.current}
+              onChange={(v) => setForm({ ...form, current: v })}
+              autoComplete="current-password" required />
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                New password
-              </label>
-              <input
-                type="password"
-                value={form.next}
-                onChange={(e) => setForm({ ...form, next: e.target.value })}
+              <PasswordField label="รหัสผ่านใหม่" value={form.next}
+                onChange={(v) => setForm({ ...form, next: v })}
                 onFocus={() => setShowRules(true)}
-                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm
-                           focus:ring-2 focus:ring-blue-500 outline-none"
-                autoComplete="new-password"
-                required
-              />
+                autoComplete="new-password" required />
 
-              {(showRules || form.next.length > 0) && (
-                <ul className="mt-2 text-xs space-y-0.5">
-                  {RULE_LABELS.map(r => (
-                    <li key={r.key}
-                        className={rules[r.key] ? 'text-green-700' : 'text-gray-500'}>
-                      {rules[r.key] ? '✓' : '○'} {r.text}
-                    </li>
-                  ))}
-                </ul>
+              {/* Strength meter */}
+              {form.next.length > 0 && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                      <motion.div className={`h-full ${strength.color}`}
+                        initial={{ width: 0 }} animate={{ width: `${(strength.score / 5) * 100}%` }}
+                        transition={{ duration: 0.3 }} />
+                    </div>
+                    <span className={`text-xs font-medium tabular-nums w-16 text-right
+                      ${strength.score <= 1 ? 'text-red-600'
+                        : strength.score === 2 ? 'text-orange-600'
+                        : strength.score === 3 ? 'text-amber-600'
+                        : strength.score === 4 ? 'text-lime-700'
+                        : 'text-emerald-700'}`}>
+                      {strength.label}
+                    </span>
+                  </div>
+                </motion.div>
               )}
+
+              {/* Rules checklist */}
+              <AnimatePresence>
+                {(showRules || form.next.length > 0) && (
+                  <motion.ul initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                    className="mt-3 text-xs space-y-1 overflow-hidden">
+                    {RULE_LABELS.map(r => {
+                      const ok = rules[r.key];
+                      return (
+                        <li key={r.key} className={`flex items-center gap-1.5 ${ok ? 'text-emerald-700' : 'text-slate-500'}`}>
+                          {ok ? <Check size={13} className="text-emerald-600" /> : <XIcon size={13} className="text-slate-300" />}
+                          {r.text}
+                        </li>
+                      );
+                    })}
+                  </motion.ul>
+                )}
+              </AnimatePresence>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Confirm new password
-              </label>
-              <input
-                type="password"
-                value={form.confirm}
-                onChange={(e) => setForm({ ...form, confirm: e.target.value })}
-                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none
-                            focus:ring-2 focus:ring-blue-500 ${
-                              form.confirm && !matches
-                                ? 'border-red-300'
-                                : 'border-gray-300'
-                            }`}
-                autoComplete="new-password"
-                required
-              />
+              <PasswordField label="ยืนยันรหัสผ่านใหม่" value={form.confirm}
+                onChange={(v) => setForm({ ...form, confirm: v })}
+                autoComplete="new-password" required
+                error={form.confirm.length > 0 && !matches} />
               {form.confirm.length > 0 && !matches && (
-                <p className="mt-1 text-xs text-red-600">รหัสผ่านไม่ตรงกัน</p>
+                <motion.p initial={{ opacity: 0, y: -3 }} animate={{ opacity: 1, y: 0 }}
+                  className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                  <XIcon size={12} /> รหัสผ่านไม่ตรงกัน
+                </motion.p>
+              )}
+              {matches && (
+                <motion.p initial={{ opacity: 0, y: -3 }} animate={{ opacity: 1, y: 0 }}
+                  className="mt-1 text-xs text-emerald-600 flex items-center gap-1">
+                  <Check size={12} /> รหัสผ่านตรงกัน
+                </motion.p>
               )}
             </div>
 
-            <button
-              type="submit"
-              disabled={!canSubmit}
-              className="w-full py-2.5 bg-blue-800 hover:bg-blue-900 text-white
-                         font-semibold rounded-lg text-sm transition disabled:opacity-50
-                         disabled:cursor-not-allowed"
-            >
-              {submitting ? 'กำลังเปลี่ยน…' : 'Change Password'}
+            <button type="submit" disabled={!canSubmit} className="btn-primary w-full !py-3 mt-2">
+              {submitting
+                ? <><Loader2 size={16} className="animate-spin" /> กำลังเปลี่ยน…</>
+                : <><ShieldCheck size={16} /> เปลี่ยนรหัสผ่าน</>}
             </button>
           </form>
-        </div>
+        </motion.div>
       </main>
     </div>
   );
