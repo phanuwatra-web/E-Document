@@ -3,6 +3,14 @@ import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
+import { format } from 'date-fns';
+import {
+  ArrowLeft, Download, Building2, Calendar, User as UserIcon,
+  CheckCircle2, Clock, PenTool, Move, Save, RotateCcw, Loader2,
+  FileText, AlertCircle,
+} from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import SignatureModal from '@/components/SignatureModal';
 import api from '@/lib/api';
@@ -18,9 +26,9 @@ export default function DocumentPage({ params }) {
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState('');
   const [showSign,    setShowSign]    = useState(false);
-  const [adjustMode,  setAdjustMode]  = useState(false);   // drag/resize after signing
-  const [adjustPos,   setAdjustPos]   = useState(null);    // {page_num, x_pct, y_pct, width_pct}
-  const [sigImage,    setSigImage]    = useState(null);    // data URL of drawn signature (null for click type)
+  const [adjustMode,  setAdjustMode]  = useState(false);
+  const [adjustPos,   setAdjustPos]   = useState(null);
+  const [sigImage,    setSigImage]    = useState(null);
   const [saving,      setSaving]      = useState(false);
   const [pdfKey,      setPdfKey]      = useState(0);
 
@@ -36,13 +44,12 @@ export default function DocumentPage({ params }) {
       const res = await api.get(`/documents/${id}`);
       setDoc(res.data);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to load document');
+      setError(err.response?.data?.error || 'โหลดเอกสารไม่สำเร็จ');
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch current user's signature metadata + image data
   const fetchMySig = async () => {
     try {
       const res = await api.get(`/signatures/me/${id}`);
@@ -55,9 +62,7 @@ export default function DocumentPage({ params }) {
     }
   };
 
-  // Called right after signing — receive signature data directly from modal
   const handleSigned = async ({ signature_type, signature_data } = {}) => {
-    // Set image immediately — no extra fetch needed
     setSigImage(signature_type === 'draw' ? signature_data : null);
     await fetchDoc();
     setShowSign(false);
@@ -66,7 +71,6 @@ export default function DocumentPage({ params }) {
     setPdfKey(k => k + 1);
   };
 
-  // Save adjusted position to backend
   const savePosition = async () => {
     if (!adjustPos) return;
     setSaving(true);
@@ -76,21 +80,20 @@ export default function DocumentPage({ params }) {
       setAdjustPos(null);
       setSigImage(null);
       setPdfKey(k => k + 1);
+      toast.success('บันทึกตำแหน่งลายเซ็นแล้ว');
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to save position');
+      toast.error(err.response?.data?.error || 'บันทึกตำแหน่งไม่สำเร็จ');
     } finally {
       setSaving(false);
     }
   };
 
-  // Discard position changes
   const keepDefault = () => {
     setAdjustMode(false);
     setAdjustPos(null);
     setSigImage(null);
   };
 
-  // Re-enter adjust mode for a signed document
   const handleEditPosition = async () => {
     const sig = await fetchMySig();
     setAdjustPos({
@@ -102,28 +105,28 @@ export default function DocumentPage({ params }) {
     setAdjustMode(true);
   };
 
-  // Download the PDF (with embedded signatures) to disk
   const handleDownload = async () => {
+    const t = toast.loading('กำลังเตรียมไฟล์…');
     try {
       const res = await api.get(`/documents/${id}/file?download=1&_t=${Date.now()}`, {
         responseType: 'blob',
       });
       const blobUrl = URL.createObjectURL(res.data);
-      const a       = document.createElement('a');
-      a.href        = blobUrl;
-      a.download    = doc?.original_name || `document-${id}.pdf`;
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = doc?.original_name || `document-${id}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      toast.success('ดาวน์โหลดสำเร็จ', { id: t });
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to download PDF');
+      toast.error(err.response?.data?.error || 'ดาวน์โหลดไม่สำเร็จ', { id: t });
     }
   };
 
-  // Remove signature so user can re-sign
   const handleResign = async () => {
-    if (!confirm('Remove your current signature so you can sign again?')) return;
+    if (!confirm('ลบลายเซ็นปัจจุบันเพื่อเซ็นใหม่?')) return;
     try {
       await api.delete(`/signatures/me/${id}`);
       await fetchDoc();
@@ -131,57 +134,78 @@ export default function DocumentPage({ params }) {
       setAdjustMode(false);
       setAdjustPos(null);
       setSigImage(null);
+      toast.success('ลบลายเซ็นแล้ว — สามารถเซ็นใหม่ได้');
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to remove signature');
+      toast.error(err.response?.data?.error || 'ลบลายเซ็นไม่สำเร็จ');
     }
   };
 
   const isSigned = doc?.my_status === 'signed' ||
     doc?.signatures?.some(s => s.signer_name === user?.name);
+  const mySig = doc?.signatures?.find(s => s.signer_name === user?.name);
 
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>
+    <div className="min-h-screen">
+      <Navbar user={user} />
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        <div className="skeleton h-6 w-32 mb-6 rounded" />
+        <div className="flex gap-6 flex-col lg:flex-row">
+          <div className="flex-1">
+            <div className="skeleton h-24 mb-4 rounded-xl" />
+            <div className="skeleton h-[600px] rounded-xl" />
+          </div>
+          <div className="lg:w-80">
+            <div className="skeleton h-40 mb-4 rounded-xl" />
+            <div className="skeleton h-48 rounded-xl" />
+          </div>
+        </div>
+      </main>
+    </div>
   );
+
   if (error) return (
-    <div className="min-h-screen flex items-center justify-center flex-col gap-3 text-red-600">
-      <p>{error}</p>
-      <Link href="/dashboard" className="text-blue-600 text-sm hover:underline">← Back</Link>
+    <div className="min-h-screen">
+      <Navbar user={user} />
+      <main className="max-w-md mx-auto px-4 py-16 text-center">
+        <AlertCircle size={48} className="mx-auto text-red-400 mb-3" />
+        <p className="text-red-600 font-medium">{error}</p>
+        <Link href="/dashboard" className="inline-flex items-center gap-1.5 mt-4 text-brand-700 hover:underline text-sm">
+          <ArrowLeft size={14} /> กลับ
+        </Link>
+      </main>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen">
       <Navbar user={user} />
 
-      <main className="max-w-7xl mx-auto px-4 py-8">
-        <Link href="/dashboard" className="text-blue-700 text-sm hover:underline">
-          ← Back to Dashboard
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <Link href="/dashboard"
+          className="inline-flex items-center gap-1.5 text-brand-700 text-sm hover:underline mb-4">
+          <ArrowLeft size={14} /> กลับสู่หน้าหลัก
         </Link>
 
-        <div className="mt-4 flex flex-col lg:flex-row gap-6">
+        <div className="flex flex-col lg:flex-row gap-6">
           {/* Left: PDF Viewer */}
           <div className="flex-1 min-w-0">
-            <div className="bg-white rounded-xl shadow-sm p-4 mb-4 flex items-start justify-between gap-3">
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+              className="card p-5 mb-4 flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h1 className="text-xl font-bold text-gray-900 truncate">{doc.title}</h1>
-                {doc.description && <p className="text-gray-500 text-sm mt-1">{doc.description}</p>}
-                <div className="flex gap-3 mt-2 text-xs text-gray-400 flex-wrap">
-                  <span>📁 {doc.department_name}</span>
-                  <span>📅 {new Date(doc.created_at).toLocaleDateString('th-TH')}</span>
-                  <span>📤 {doc.uploaded_by_name}</span>
+                <h1 className="text-xl font-bold text-slate-900 truncate">{doc.title}</h1>
+                {doc.description && <p className="text-slate-500 text-sm mt-1">{doc.description}</p>}
+                <div className="flex gap-3 mt-2.5 text-xs text-slate-500 flex-wrap">
+                  <span className="inline-flex items-center gap-1"><Building2 size={12} /> {doc.department_name}</span>
+                  <span className="inline-flex items-center gap-1"><Calendar size={12} /> {format(new Date(doc.created_at), 'dd/MM/yyyy')}</span>
+                  <span className="inline-flex items-center gap-1"><UserIcon size={12} /> {doc.uploaded_by_name}</span>
                 </div>
               </div>
-              <button
-                onClick={handleDownload}
-                className="flex-shrink-0 px-3 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold rounded-lg transition flex items-center gap-1.5"
-                title="Download signed PDF"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
-                </svg>
-                Download
+              <button onClick={handleDownload}
+                className="btn-primary flex-shrink-0 !py-2"
+                title="ดาวน์โหลด PDF พร้อมลายเซ็น">
+                <Download size={14} /> Download
               </button>
-            </div>
+            </motion.div>
 
             <PDFViewer
               documentId={id}
@@ -194,125 +218,131 @@ export default function DocumentPage({ params }) {
           </div>
 
           {/* Right: Signing Panel */}
-          <div className="lg:w-80 flex-shrink-0">
+          <div className="lg:w-80 flex-shrink-0 space-y-4">
 
-            {/* ── ADJUST MODE (after signing) ── */}
-            {isSigned && adjustMode ? (
-              <div className="rounded-xl p-5 mb-4 bg-blue-50 border border-blue-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-2xl">📐</span>
-                  <span className="font-bold text-blue-800">Adjust Signature</span>
-                </div>
-                <p className="text-xs text-blue-700 mb-4">
-                  Drag the box to move · drag the corner handle to resize
-                </p>
-                <button
-                  onClick={savePosition}
-                  disabled={saving}
-                  className="w-full py-2.5 bg-blue-800 hover:bg-blue-900 text-white font-semibold rounded-lg text-sm transition disabled:opacity-50 mb-2"
-                >
-                  {saving ? 'Saving…' : '💾 Save Position'}
-                </button>
-                <button
-                  onClick={keepDefault}
-                  className="w-full py-2 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition"
-                >
-                  Keep as is
-                </button>
-              </div>
-
-            ) : isSigned ? (
-              /* ── SIGNED (normal) ── */
-              <div className="rounded-xl p-5 mb-4 bg-green-50 border border-green-200">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-2xl">✅</span>
-                  <span className="font-bold text-green-800">You have signed</span>
-                </div>
-                {doc.signatures?.find(s => s.signer_name === user?.name) && (
-                  <p className="text-xs text-green-700 mt-1">
-                    Signed on {new Date(
-                      doc.signatures.find(s => s.signer_name === user?.name).signed_at
-                    ).toLocaleString('th-TH')}
+            <AnimatePresence mode="wait">
+              {isSigned && adjustMode ? (
+                <motion.div key="adjust"
+                  initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                  className="rounded-xl p-5 bg-gradient-to-br from-brand-50 to-blue-100 border border-brand-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="p-1.5 bg-brand-200 rounded-md">
+                      <Move size={16} className="text-brand-800" />
+                    </div>
+                    <span className="font-bold text-brand-900">จัดตำแหน่งลายเซ็น</span>
+                  </div>
+                  <p className="text-xs text-brand-800 mb-4 leading-relaxed">
+                    ลากกล่องเพื่อย้าย · ลากมุมเพื่อปรับขนาด
                   </p>
-                )}
-                <div className="mt-3 space-y-2">
-                  <button
-                    onClick={handleEditPosition}
-                    className="w-full py-2 border border-green-400 text-green-800 rounded-lg text-sm hover:bg-green-100 transition"
-                  >
-                    📐 Adjust position / size
+                  <button onClick={savePosition} disabled={saving}
+                    className="btn-primary w-full mb-2">
+                    {saving ? <><Loader2 size={14} className="animate-spin" /> กำลังบันทึก…</>
+                            : <><Save size={14} /> บันทึกตำแหน่ง</>}
                   </button>
-                  <button
-                    onClick={handleResign}
-                    className="w-full py-2 border border-gray-300 text-gray-500 rounded-lg text-sm hover:bg-gray-50 transition"
-                  >
-                    ↻ Re-sign
+                  <button onClick={keepDefault} className="btn-secondary w-full">
+                    คงไว้แบบเดิม
                   </button>
-                </div>
-              </div>
+                </motion.div>
 
-            ) : (
-              /* ── NOT SIGNED ── */
-              <div className="rounded-xl p-5 mb-4 bg-yellow-50 border border-yellow-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-2xl">⏳</span>
-                  <span className="font-bold text-yellow-800">Signature Required</span>
-                </div>
-                <p className="text-xs text-yellow-700 mb-3">
-                  Review the document and click below to sign.
-                </p>
-                <button
-                  onClick={() => setShowSign(true)}
-                  className="w-full py-2.5 bg-blue-800 hover:bg-blue-900 text-white font-semibold rounded-lg text-sm transition"
-                >
-                  ✍️ Sign This Document
-                </button>
-              </div>
-            )}
+              ) : isSigned ? (
+                <motion.div key="signed"
+                  initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                  className="rounded-xl p-5 bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="p-1.5 bg-emerald-200 rounded-md">
+                      <CheckCircle2 size={18} className="text-emerald-700" />
+                    </div>
+                    <span className="font-bold text-emerald-900">ลงนามเรียบร้อย</span>
+                  </div>
+                  {mySig && (
+                    <p className="text-xs text-emerald-800 mt-1.5 ml-9">
+                      เมื่อ {format(new Date(mySig.signed_at), 'dd MMM yyyy · HH:mm')}
+                    </p>
+                  )}
+                  <div className="mt-4 space-y-2">
+                    <button onClick={handleEditPosition}
+                      className="w-full inline-flex items-center justify-center gap-2 py-2 border border-emerald-400 text-emerald-800 rounded-lg text-sm font-medium hover:bg-emerald-100 transition">
+                      <Move size={14} /> ปรับตำแหน่ง / ขนาด
+                    </button>
+                    <button onClick={handleResign}
+                      className="w-full inline-flex items-center justify-center gap-2 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm hover:bg-slate-50 transition">
+                      <RotateCcw size={14} /> เซ็นใหม่
+                    </button>
+                  </div>
+                </motion.div>
+
+              ) : (
+                <motion.div key="pending"
+                  initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                  className="rounded-xl p-5 bg-gradient-to-br from-amber-50 to-amber-100 border border-amber-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="p-1.5 bg-amber-200 rounded-md">
+                      <Clock size={18} className="text-amber-700" />
+                    </div>
+                    <span className="font-bold text-amber-900">รอการลงนาม</span>
+                  </div>
+                  <p className="text-xs text-amber-800 mb-4 leading-relaxed">
+                    กรุณาอ่านเอกสารแล้วกดลงนามด้านล่าง
+                  </p>
+                  <button onClick={() => setShowSign(true)}
+                    className="btn-primary w-full">
+                    <PenTool size={14} /> ลงนามเอกสาร
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Signers list */}
-            <div className="bg-white rounded-xl shadow-sm p-5">
-              <h3 className="font-bold text-gray-800 mb-3 text-sm">
-                Signers ({doc.signatures?.length || 0})
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+              className="card p-5">
+              <h3 className="font-bold text-slate-800 mb-3 text-sm flex items-center gap-2">
+                <CheckCircle2 size={14} className="text-emerald-600" />
+                ผู้ลงนาม ({doc.signatures?.length || 0})
               </h3>
               {doc.signatures?.length === 0 ? (
-                <p className="text-gray-400 text-xs text-center py-4">No signatures yet</p>
+                <p className="text-slate-400 text-xs text-center py-4">ยังไม่มีผู้ลงนาม</p>
               ) : (
                 <div className="space-y-3">
                   {doc.signatures?.map(sig => (
                     <div key={sig.id} className="flex items-start gap-3">
-                      <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 text-sm">✓</div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{sig.signer_name}</p>
-                        <p className="text-xs text-gray-400">{sig.employee_id}</p>
-                        <p className="text-xs text-gray-400">
-                          {new Date(sig.signed_at).toLocaleString('th-TH')} · {sig.signature_type}
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 grid place-items-center text-white text-xs font-bold flex-shrink-0">
+                        {(sig.signer_name || '?').split(' ').map(w => w[0]).slice(0,2).join('')}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-900 truncate">{sig.signer_name}</p>
+                        <p className="text-xs text-slate-400">{sig.employee_id}</p>
+                        <p className="text-xs text-slate-400">
+                          {format(new Date(sig.signed_at), 'dd/MM HH:mm')} · {sig.signature_type === 'draw' ? 'วาดมือ' : 'คลิกลงนาม'}
                         </p>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
-            </div>
+            </motion.div>
 
             {/* Document info */}
-            <div className="bg-white rounded-xl shadow-sm p-5 mt-4">
-              <h3 className="font-bold text-gray-800 mb-3 text-sm">Document Info</h3>
-              <div className="space-y-2 text-xs text-gray-600">
-                <div className="flex justify-between">
-                  <span className="text-gray-400">File</span>
-                  <span className="font-medium truncate max-w-[160px]">{doc.original_name}</span>
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+              className="card p-5">
+              <h3 className="font-bold text-slate-800 mb-3 text-sm flex items-center gap-2">
+                <FileText size={14} className="text-brand-700" />
+                ข้อมูลเอกสาร
+              </h3>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-500">ไฟล์</span>
+                  <span className="font-medium truncate text-slate-700 max-w-[160px]">{doc.original_name}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Size</span>
-                  <span>{doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB` : '—'}</span>
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-500">ขนาด</span>
+                  <span className="text-slate-700">{doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB` : '—'}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Department</span>
-                  <span>{doc.department_name}</span>
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-500">แผนก</span>
+                  <span className="text-slate-700">{doc.department_name}</span>
                 </div>
               </div>
-            </div>
+            </motion.div>
           </div>
         </div>
       </main>
