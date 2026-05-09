@@ -28,12 +28,12 @@
     "pg": "^8.11.5",
     "pino": "^9.4.0",
     "pino-http": "^10.3.0",
+    "pino-pretty": "^11.2.2",
     "uuid": "^11.1.1"
   },
   "devDependencies": {
     "jest":        "^29.7.0",
     "nodemon":     "^3.1.2",
-    "pino-pretty": "^11.2.2",
     "supertest":   "^7.0.0"
   }
 }
