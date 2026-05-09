@@ -9,8 +9,9 @@ import {
 } from 'recharts';
 import {
   FileText, Clock, CheckCircle2, Building2, Plus, Eye, Download,
-  Trash2, BarChart3, X, Search, TrendingUp,
+  Trash2, BarChart3, X, Search, TrendingUp, FileSpreadsheet,
 } from 'lucide-react';
+import { exportToExcel, timestampedFilename } from '@/lib/exportExcel';
 import { toast } from 'sonner';
 import { format, subDays, startOfDay, isAfter } from 'date-fns';
 import Navbar from '@/components/Navbar';
@@ -127,6 +128,33 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleExport = () => {
+    try {
+      const rows = filtered.map(d => ({
+        'ชื่อเอกสาร':       d.title,
+        'แผนก':             d.department_name || '',
+        'ผู้อัพโหลด':       d.uploaded_by_name || '',
+        'วันที่อัพโหลด':    format(new Date(d.created_at), 'yyyy-MM-dd HH:mm'),
+        'เซ็นแล้ว':         Number(d.signed_count || 0),
+        'ทั้งหมด':          Number(d.total_assignees || 0),
+        'อัตราการเซ็น (%)': d.total_assignees > 0
+                              ? Math.round((d.signed_count / d.total_assignees) * 100)
+                              : 0,
+        'สถานะ':            (Number(d.signed_count) >= Number(d.total_assignees) && Number(d.total_assignees) > 0)
+                              ? 'เสร็จสมบูรณ์' : 'ยังไม่เสร็จ',
+      }));
+      exportToExcel({
+        filename:    timestampedFilename('documents'),
+        sheetName:   'Documents',
+        rows,
+        columnWidths: [40, 16, 22, 18, 10, 10, 16, 14],
+      });
+      toast.success(`Export ${rows.length} เอกสารสำเร็จ`);
+    } catch (err) {
+      toast.error(err.message || 'Export ไม่สำเร็จ');
+    }
+  };
+
   const handleDelete = async (doc) => {
     if (!confirm(`ลบเอกสาร "${doc.title}"?\n\nการลบไม่สามารถย้อนกลับได้`)) return;
     setDeleting(doc.id);
@@ -219,9 +247,16 @@ export default function AdminDashboard() {
             </h1>
             <p className="text-sm text-slate-500 mt-0.5">สรุปสถานะการลงนามเอกสารทั้งหมด</p>
           </div>
-          <Link href="/admin/upload" className="btn-primary">
-            <Plus size={16} /> Upload Document
-          </Link>
+          <div className="flex gap-2">
+            <button onClick={handleExport} disabled={documents.length === 0}
+              className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+              title="ดาวน์โหลด Excel">
+              <FileSpreadsheet size={16} /> Export
+            </button>
+            <Link href="/admin/upload" className="btn-primary">
+              <Plus size={16} /> Upload Document
+            </Link>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
