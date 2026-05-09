@@ -3,16 +3,37 @@ const db     = require('../config/database');
 const audit  = require('../services/audit.service');
 const { validatePassword } = require('../utils/password');
 
+// Opt-in pagination. Pass ?page=1&limit=20 to get { items, total, page, limit, totalPages }.
+// No page param → returns array (legacy). See document.controller for rationale.
 const getUsers = async (req, res, next) => {
   try {
-    const result = await db.query(
-      `SELECT u.id, u.employee_id, u.name, u.email, u.role, u.is_active, u.created_at,
+    const wantsPaginated = req.query.page !== undefined;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
+
+    const baseSql = `SELECT u.id, u.employee_id, u.name, u.email, u.role, u.is_active, u.created_at,
               d.id AS department_id, d.name AS department_name
        FROM users u
        LEFT JOIN departments d ON u.department_id = d.id
-       ORDER BY u.created_at DESC`
-    );
-    res.json(result.rows);
+       ORDER BY u.created_at DESC`;
+
+    if (!wantsPaginated) {
+      const result = await db.query(baseSql);
+      return res.json(result.rows);
+    }
+
+    const countRes = await db.query(`SELECT COUNT(*)::int AS n FROM users`);
+    const total = countRes.rows[0].n;
+
+    const result = await db.query(`${baseSql} LIMIT $1 OFFSET $2`, [limit, offset]);
+    res.json({
+      items:      result.rows,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    });
   } catch (err) {
     next(err);
   }
