@@ -74,13 +74,15 @@ const login = async (req, res, next) => {
       // immediately, without an extra round-trip to read document.cookie.
       csrfToken,
       user: {
-        id:              user.id,
-        employee_id:     user.employee_id,
-        name:            user.name,
-        email:           user.email,
-        role:            user.role,
-        department_id:   user.department_id,
-        department_name: user.department_name,
+        id:                  user.id,
+        employee_id:         user.employee_id,
+        name:                user.name,
+        email:               user.email,
+        role:                user.role,
+        department_id:       user.department_id,
+        department_name:     user.department_name,
+        // Drives the consent modal — null means "show it on next page".
+        privacy_accepted_at: user.privacy_accepted_at,
       },
     });
   } catch (err) {
@@ -92,6 +94,7 @@ const getMe = async (req, res, next) => {
   try {
     const result = await db.query(
       `SELECT u.id, u.employee_id, u.name, u.email, u.role, u.department_id,
+              u.privacy_accepted_at,
               d.name AS department_name
        FROM users u
        LEFT JOIN departments d ON u.department_id = d.id
@@ -205,6 +208,41 @@ const changePassword = async (req, res, next) => {
 };
 
 /**
+ * Mark that the calling user has accepted the current Privacy Notice.
+ * This is what PDPA calls a "data subject's record of consent" — we keep
+ * a UTC timestamp + IP/user-agent (in audit_logs) to prove acceptance.
+ *
+ * Idempotent on purpose: if the user clicks accept twice we keep the FIRST
+ * acceptance time (more accurate evidence). If you ever publish a new
+ * privacy policy version, manually `UPDATE users SET privacy_accepted_at=NULL`
+ * and the modal will reappear.
+ */
+const acceptPrivacy = async (req, res, next) => {
+  try {
+    const r = await db.query(
+      `UPDATE users
+         SET privacy_accepted_at = COALESCE(privacy_accepted_at, NOW())
+         WHERE id = $1
+         RETURNING privacy_accepted_at`,
+      [req.user.id]
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'User not found' });
+
+    audit.log({
+      req,
+      action:       audit.ACTIONS.PRIVACY_ACCEPTED,
+      resourceType: 'user',
+      resourceId:   req.user.id,
+      metadata:     { accepted_at: r.rows[0].privacy_accepted_at },
+    });
+
+    res.json({ ok: true, privacy_accepted_at: r.rows[0].privacy_accepted_at });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * Issue a CSRF token without requiring authentication. The SPA calls this on
  * boot so it can include X-CSRF-Token in the very first POST (login).
  * Setting the cookie here AND returning the value lets the client choose
@@ -225,4 +263,6 @@ const logout = (req, res) => {
   res.json({ ok: true });
 };
 
-module.exports = { login, loginValidation, getMe, getCsrfToken, logout, changePassword };
+module.exports = {
+  login, loginValidation, getMe, getCsrfToken, logout, changePassword, acceptPrivacy,
+};
