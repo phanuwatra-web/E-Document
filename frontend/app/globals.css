@@ -4,6 +4,32 @@
 
 @layer base {
   * { box-sizing: border-box; }
+  html { -webkit-tap-highlight-color: transparent; }
+  body { font-feature-settings: "cv02","cv03","cv04","cv11"; }
+}
+
+@layer components {
+  .skeleton {
+    @apply relative overflow-hidden bg-slate-200/70 rounded;
+    background-image: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.6) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s linear infinite;
+  }
+  .card {
+    @apply bg-white rounded-xl border border-slate-200/70 shadow-sm;
+  }
+  .card-hover {
+    @apply transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 hover:border-slate-300;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-800 hover:bg-brand-900 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-lg transition-colors;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
 }
 
 /* react-pdf layers */
