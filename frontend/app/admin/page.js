@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { format, subDays, startOfDay, isAfter } from 'date-fns';
 import Navbar from '@/components/Navbar';
 import PrivacyConsentModal from '@/components/PrivacyConsentModal';
+import Pagination from '@/components/Pagination';
 import api from '@/lib/api';
 
 const KpiCard = ({ icon: Icon, label, value, hint, accent }) => (
@@ -78,6 +79,8 @@ export default function AdminDashboard() {
   const [activeDoc,   setActiveDoc]   = useState(null);
   const [deleting,    setDeleting]    = useState(null);
   const [search,      setSearch]      = useState('');
+  const [page,        setPage]        = useState(1);
+  const LIMIT = 20;
 
   useEffect(() => {
     const u = localStorage.getItem('user');
@@ -90,6 +93,9 @@ export default function AdminDashboard() {
       api.get('/users/departments').then(r => setDepartments(r.data)).catch(() => {}),
     ]).finally(() => setLoading(false));
   }, []);
+
+  // Reset to page 1 when search changes
+  useEffect(() => { setPage(1); }, [search]);
 
   const viewStatus = async (doc) => {
     setActiveDoc(doc);
@@ -185,6 +191,9 @@ export default function AdminDashboard() {
       (d.uploaded_by_name || '').toLowerCase().includes(q)
     );
   }, [documents, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / LIMIT));
+  const pageItems  = filtered.slice((page - 1) * LIMIT, page * LIMIT);
 
   const needsConsent = user && !user.privacy_accepted_at;
 
@@ -313,7 +322,7 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filtered.map(doc => (
+                    {pageItems.map(doc => (
                       <tr key={doc.id} className="hover:bg-slate-50 transition-colors">
                         <td className="px-5 py-4 font-medium text-slate-900 max-w-[220px] truncate">{doc.title}</td>
                         <td className="px-5 py-4">
@@ -352,6 +361,12 @@ export default function AdminDashboard() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {filtered.length > LIMIT && (
+              <div className="px-5 py-3 border-t border-slate-100">
+                <Pagination page={page} totalPages={totalPages} total={filtered.length} limit={LIMIT}
+                  onPageChange={setPage} />
               </div>
             )}
           </div>
