@@ -5,6 +5,28 @@ const bcrypt = require('bcrypt');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 async function seed() {
+  // Validate env BEFORE touching the DB so a refused run is a true no-op.
+  const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD;
+  const USER_PASSWORD  = process.env.SEED_USER_PASSWORD;
+  const missing = [];
+  if (!ADMIN_PASSWORD) missing.push('SEED_ADMIN_PASSWORD');
+  if (!USER_PASSWORD)  missing.push('SEED_USER_PASSWORD');
+  if (missing.length > 0) {
+    console.error('\n' + '='.repeat(70));
+    console.error('  ❌ SEED REFUSED — missing required env vars: ' + missing.join(', '));
+    console.error('='.repeat(70));
+    console.error('  Re-run with strong passwords, e.g.:');
+    console.error('    SEED_ADMIN_PASSWORD=\'YourStrongAdminP@ss2026\' \\');
+    console.error('    SEED_USER_PASSWORD=\'YourStrongUserP@ss2026\' \\');
+    console.error('    node database/seed.js');
+    console.error('='.repeat(70) + '\n');
+    process.exit(1);
+  }
+  if (ADMIN_PASSWORD.length < 12 || USER_PASSWORD.length < 12) {
+    console.error('\n  ❌ Seed passwords must be at least 12 chars\n');
+    process.exit(1);
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -19,23 +41,15 @@ async function seed() {
     `);
     console.log('✓ Departments seeded');
 
-    // Defaults that PASS the password policy (Phase 8). Override via env vars
-    // when the script is run in CI / staging, e.g.:
-    //   SEED_ADMIN_PASSWORD='S0me$tr0ng!' node seed.js
-    // These are still PUBLISHED defaults — operators MUST change them after
-    // first login. The big banner below makes that explicit.
-    const ADMIN_DEFAULT = process.env.SEED_ADMIN_PASSWORD || 'ChangeMe!Admin2026';
-    const USER_DEFAULT  = process.env.SEED_USER_PASSWORD  || 'ChangeMe!User2026';
-
-    const adminHash = await bcrypt.hash(ADMIN_DEFAULT, 12);
-    const userHash  = await bcrypt.hash(USER_DEFAULT,  12);
+    const adminHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
+    const userHash  = await bcrypt.hash(USER_PASSWORD,  12);
 
     await client.query(`
       INSERT INTO users (employee_id, name, email, password_hash, role)
       VALUES ($1, $2, $3, $4, 'admin')
       ON CONFLICT (employee_id) DO NOTHING
     `, ['3619', 'System Administrator', 'admin@company.com', adminHash]);
-    console.log(`✓ Admin seeded  → 3619 / ${ADMIN_DEFAULT}`);
+    console.log('✓ Admin seeded  → 3619');
 
     const depts = await client.query('SELECT id, name FROM departments');
     const deptMap = {};
@@ -59,19 +73,18 @@ async function seed() {
         ON CONFLICT (employee_id) DO NOTHING
       `, [u.id, u.name, u.email, userHash, deptMap[u.dept]]);
     }
-    console.log(`✓ Users seeded  →  3686..3693 / ${USER_DEFAULT}`);
+    console.log('✓ Users seeded  →  3686..3693');
 
     await client.query('COMMIT');
     console.log('\nSeed completed successfully!');
     console.log('\n' + '='.repeat(70));
     console.log('  ⚠  SECURITY WARNING                                                  ');
     console.log('='.repeat(70));
-    console.log('  Default passwords are PUBLIC knowledge. Before going live:');
-    console.log('    1. Login with admin                3619 / ' + ADMIN_DEFAULT);
-    console.log('    2. Open /account/change-password and pick a strong password');
-    console.log('    3. Tell every seeded user to do the same');
-    console.log('       OR run: node database/change-password.js');
-    console.log('  Skipping this step is the #1 cause of compromised deployments.');
+    console.log('  Passwords were supplied via env vars (not stored in source).');
+    console.log('  Recommended: every seeded user should change their password');
+    console.log('  on first login at /account/change-password');
+    console.log('  Distribute the temporary passwords through a secure channel,');
+    console.log('  not chat / email / commit messages.');
     console.log('='.repeat(70) + '\n');
   } catch (err) {
     await client.query('ROLLBACK');
